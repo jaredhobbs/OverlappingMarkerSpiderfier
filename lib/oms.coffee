@@ -188,10 +188,12 @@ class @['OverlappingMarkerSpiderfier']
       m for m, i in @markers when mData[i].willSpiderfy
 
   p.makeHighlightListenerFuncs = (marker) ->
-      highlight: => marker['_omsData'].leg.setColor(@['legColors']['highlighted'][@map.getMapType()])
-                    marker['_omsData'].leg.setAttribute('zIndex', @['highlightedLegZIndex'])
-      unhighlight: => marker['_omsData'].leg.setColor(@['legColors']['usual'][@map.mapTypeId])
-                      marker['_omsData'].leg.setAttribute('zIndex', @['usualLegZIndex'])
+      highlight: =>
+          marker['_omsData'].leg.setColor(@['legColors']['highlighted'][@map.getMapType()])
+          marker['_omsData'].leg.setAttribute('zIndex', @['highlightedLegZIndex'])
+      unhighlight: =>
+          marker['_omsData'].leg.setColor(@['legColors']['usual'][@map.mapTypeId])
+          marker['_omsData'].leg.setAttribute('zIndex', @['usualLegZIndex'])
 
   p.spiderfy = (markerData, nonNearbyMarkers) ->
       @spiderfying = yes
