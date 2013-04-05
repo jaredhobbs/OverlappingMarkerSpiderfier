@@ -12,11 +12,13 @@ coffee --output $OUTDIR --compile ${INDIR}${INPREFIX}.coffee
 java -jar /usr/local/closure-compiler/compiler.jar \
   --compilation_level ADVANCED_OPTIMIZATIONS \
   --js ${OUTDIR}${INPREFIX}.js \
-  --externs google_maps_api_v3_7.js \
   --output_wrapper '(function(){%output%}).call(this);' \
 > $OUTFILE
 
 echo '/*' $(date) '*/' >> $OUTFILE
 
+git checkout gh-pages
 cp $OUTFILE ../../gh-pages/bin
 cp ${OUTDIR}${INPREFIX}.js ../../gh-pages/bin
+git commit -a -m 'Updated build'
+git checkout master
