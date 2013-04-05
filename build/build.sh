@@ -1,5 +1,4 @@
 #!/bin/bash
-PWD=`pwd`
 INDIR=../lib/
 INPREFIX=oms
 
@@ -23,4 +22,4 @@ cp ${OUTDIR}${INPREFIX}.js ../bin
 git commit -a -m 'Updated build'
 cd ..
 git checkout master
-cd ${PWD}
+cd build
