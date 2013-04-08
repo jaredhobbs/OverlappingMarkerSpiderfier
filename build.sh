@@ -1,5 +1,5 @@
 #!/bin/bash
-INDIR=lib/
+INDIR=./
 INPREFIX=oms
 
 OUTDIR=./tmp/
@@ -16,8 +16,8 @@ java -jar /usr/local/closure-compiler/compiler.jar \
 
 echo '/*' $(date) '*/' >> $OUTFILE
 
-git checkout gh-pages
-cp $OUTFILE bin/
-cp ${OUTDIR}${INPREFIX}.js bin/
-git commit -a -m 'Updated build'
-git checkout master
+#git checkout gh-pages
+#cp $OUTFILE bin/
+#cp ${OUTDIR}${INPREFIX}.js bin/
+#git commit -a -m 'Updated build'
+#git checkout master
