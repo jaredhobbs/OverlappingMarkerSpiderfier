@@ -3,12 +3,12 @@ https://github.com/jaredhobbs/OverlappingMarkerSpiderfier
 Copyright (c) 2011 - 2012 George MacKerron
 Released under the MIT licence: http://opensource.org/licenses/mit-license
 Mapstraction port by Jared Hobbs
-Note: The Mapstraction API must be included *before* this code
+Note: The OpenLayers API must be included *before* this code
 ###
 
 # NB. string literal properties -- object['key'] -- are for Closure Compiler ADVANCED_OPTIMIZATION
 
-return unless this['mxn']?  # return from wrapper func without doing anything
+return unless this['OpenLayers']?  # return from wrapper func without doing anything
 
 class @['OverlappingMarkerSpiderfier']
   p = @::  # this saves a lot of repetition of .prototype that isn't optimized away
@@ -35,16 +35,6 @@ class @['OverlappingMarkerSpiderfier']
   p['highlightedLegZIndex'] = 20     # ensure highlighted leg is always on top
 
   p['legWeight'] = 1.5
-  p['legColors'] =
-      'usual': {}
-      'highlighted': {}
-
-  lcU = p['legColors']['usual']
-  lcH = p['legColors']['highlighted']
-  lcU[mxn.Mapstraction.HYBRID] = lcU[mxn.Mapstraction.SATELLITE] = '#FFFFFF'
-  lcH[mxn.Mapstraction.HYBRID] = lcH[mxn.Mapstraction.SATELLITE] = '#F00F00'
-  lcU[mxn.Mapstraction.PHYSICAL] = lcU[mxn.Mapstraction.ROAD] = '#444444'
-  lcH[mxn.Mapstraction.PHYSICAL] = lcH[mxn.Mapstraction.ROAD] = '#F00F00'
 
   # Note: it's OK that this constructor comes after the properties, because a function defined by a 
   # function declaration can be used before the function declaration itself
@@ -52,8 +42,6 @@ class @['OverlappingMarkerSpiderfier']
       (@[k] = v) for own k, v of opts
       @initMarkerArrays()
       @listeners = {}
-      @map.click.addHandler(=> @['unspiderfy']())
-      @map.changeZoom.addHandler(=> @['unspiderfy']())
 
   p['initMarkerArrays'] = ->
       @markers = []
@@ -63,13 +51,13 @@ class @['OverlappingMarkerSpiderfier']
       return @ if marker['_oms']?
       marker['_oms'] = yes
       markerListener = => @spiderListener(marker)
-      marker.click.addHandler(markerListener)
+      marker.events.register('mousedown', marker, markerListener)
       @markerListenerRefs.push(markerListener)
       @markers.push(marker)
       @  # return self, for chaining
 
   p['markerChangeListener'] = (marker, positionChanged) ->
-      if marker['_omsData']? and (positionChanged or not marker.onmap) and not (@spiderfying? or @unspiderfying?)
+      if marker['_omsData']? and (positionChanged or not marker.isDrawn()) and not (@spiderfying? or @unspiderfying?)
           @unspiderfy(if positionChanged then marker else null)
 
   p['getMarkers'] = -> @markers[0..]  # returns a copy, so no funny business
@@ -79,7 +67,7 @@ class @['OverlappingMarkerSpiderfier']
       i = @arrIndexOf(@markers, marker)
       return @ if i < 0
       markerListener = @markerListenerRefs.splice(i, 1)[0]
-      marker.click.removeHandler(markerListener)
+      marker.events.unregister('mousedown', marker, markerListener)
       delete marker['_oms']
       @markers.splice(i, 1)
       @  # return self, for chaining
@@ -88,7 +76,7 @@ class @['OverlappingMarkerSpiderfier']
       @['unspiderfy']()
       for marker, i in @markers
           markerListener = @markerListenerRefs[i]
-          marker.click.removeHandler(markerListener)
+          marker.events.unregister('mousedown', marker, markerListener)
           delete marker['_oms']
       @initMarkerArrays()
       @  # return self, for chaining
@@ -116,33 +104,29 @@ class @['OverlappingMarkerSpiderfier']
       angleStep = twoPi / count
       for i in [0...count]
           angle = @['circleStartAngle'] + i * angleStep
-          tmp = new mxn.LatLonPoint()
-          tmp.fromProprietary(@map.api, {lat: centerPt.lat + legLength * Math.cos(angle), lon: centerPt.lon + legLength * Math.sin(angle)})
-          @llToPt(tmp)
+          new OpenLayers.Geometry.Point(centerPt.lon + legLength * Math.sin(angle), centerPt.lat + legLength * Math.cos(angle))
 
   p['generatePtsSpiral'] = (count, centerPt) ->
       legLength = @['spiralLengthStart']
       angle = 0
       for i in [0...count]
           angle += @['spiralFootSeparation'] / legLength + i * 0.0005
-          tmp = new mxn.LatLonPoint()
-          tmp.fromProprietary(@map.api, {lat: centerPt.lat + legLength * Math.cos(angle), lon: centerPt.lon + legLength * Math.sin(angle)})
-          pt = @llToPt(tmp)
+          pt = new OpenLayers.Geometry.Point(centerPt.lon + legLength * Math.sin(angle), centerPt.lat + legLength * Math.cos(angle))
           legLength += twoPi * @['spiralLengthFactor'] / angle
           pt
 
   p['spiderListener'] = (marker) ->
       markerSpiderfied = marker['_omsData']? @['unspiderfy']() unless markerSpiderfied and @['keepSpiderfied']
-      if markerSpiderfied or @map.getMapType() is 'GoogleEarthAPI'  # don't spiderfy in GE Plugin!
+      if markerSpiderfied
           @trigger('click', marker)
       else
           nearbyMarkerData = []
           nonNearbyMarkers = []
           nDist = @['nearbyDistance']
           pxSq = nDist * nDist
-          markerPt = @llToPt(marker.location)
+          markerPt = @llToPt(marker.lonlat)
           for m in @markers
-              mPt = @llToPt(m.location)
+              mPt = @llToPt(m.lonlat)
               if @ptDistanceSq(mPt, markerPt) < pxSq
                   nearbyMarkerData.push(marker: m, markerPt: mPt)
               else
@@ -155,11 +139,11 @@ class @['OverlappingMarkerSpiderfier']
   p['markersNearMarker'] = (marker, firstOnly = no) ->
       nDist = @['nearbyDistance']
       pxSq = nDist * nDist
-      markerPt = @llToPt(marker.location)
+      markerPt = @llToPt(marker.lonlat)
       markers = []
       for m in @markers
-          continue if m is marker or not m.map? or not m.onmap
-          mPt = @llToPt(m['_omsData']?.usualPosition ? m.location)
+          continue if m is marker or not m.map? or not m.isDrawn()
+          mPt = @llToPt(m['_omsData']?.usualPosition ? m.lonlat)
           if @ptDistanceSq(mPt, markerPt) < pxSq
               markers.push(m)
               break if firstOnly
@@ -169,14 +153,14 @@ class @['OverlappingMarkerSpiderfier']
       nDist = @['nearbyDistance']
       pxSq = nDist * nDist
       mData = for m in @markers
-          {pt: @llToPt(m['_omsData']?.usualPosition ? m.location), willSpiderfy: no}
+          {pt: @llToPt(m['_omsData']?.usualPosition ? m.lonlat), willSpiderfy: no}
       for m1, i1 in @markers
-          continue unless m1.map? and m1.onmap
+          continue unless m1.map? and m1.isDrawn()
           m1Data = mData[i1]
           continue if m1Data.willSpiderfy
           for m2, i2 in @markers
               continue if i2 is i1
-              continue unless m2.map? and m2.onmap
+              continue unless m2.map? and m2.isDrawn()
               m2Data = mData[i2]
               continue if i2 < i1 and not m2Data.willSpiderfy
               if @ptDistanceSq(m1Data.pt, m2Data.pt) < pxSq
@@ -193,23 +177,14 @@ class @['OverlappingMarkerSpiderfier']
       else
           @generatePtsCircle(numFeet, bodyPt)
       spiderfiedMarkers = for footPt in footPts
-          footLl = new mxn.LatLonPoint()
-          footLl.fromProprietary(@map.api, footPt)
-          footLl.lng = footLl.lon + 3
-          footLl.lat += 3
+          footLl = @ptToLl(footPt)
           nearestMarkerDatum = @minExtract(markerData, (md) => @ptDistanceSq(md.markerPt, footPt))
           marker = nearestMarkerDatum.marker
-          leg = new mxn.Polyline([marker.location, footLl])
-          leg.setColor(@['legColors']['usual'][@map.getMapType()])
-          leg.setWidth(@['legWeight'])
-          leg.setAttribute('zIndex', @['usualLegZIndex'])
-          @map.addPolyline(leg)
+          leg = new OpenLayers.Geometry.Curve([marker.lonlat, footLl])
+          @map.getLayersByName('oms')[0].addFeatures(new OpenLayers.Feature.Vector(leg, null, {strokeColor: "black"}))
           marker['_omsData'] =
-              usualPosition: marker.location
+              usualPosition: marker.lonlat
               leg: leg
-          marker.lat = footLl.lat
-          marker.lon = marker.lng = footLl.lon
-          marker.setAttribute('zIndex', Math.round(@['spiderfiedZIndex'] + footPt.lat))  # lower markers cover higher
           marker
       delete @spiderfying
       @spiderfied = yes
@@ -236,20 +211,33 @@ class @['OverlappingMarkerSpiderfier']
       @  # return self, for chaining
 
   p['ptDistanceSq'] = (pt1, pt2) ->
-      dx = pt1.lon - pt2.lon
-      dy = pt1.lat - pt2.lat
+      dx = pt1.x - pt2.x
+      dy = pt1.y - pt2.y
       dx * dx + dy * dy
 
   p['ptAverage'] = (pts) ->
       sumX = sumY = 0
       for pt in pts
-          sumX += pt.lon; sumY += pt.lat
+          sumX += pt.x; sumY += pt.y
       numPts = pts.length
-      tmp = new mxn.LatLonPoint()
-      tmp.fromProprietary(@map.api, {lon: sumX / numPts, lat: sumY / numPts})
-      @llToPt(tmp)
+      new OpenLayers.LonLat(sumX / numPts, sumY / numPts)
 
-  p['llToPt'] = (ll) -> ll.toProprietary(@map.api)
+  p['llToPt'] = (ll) ->
+      point = new OpenLayers.Geometry.Point(ll.lon, ll.lat)
+      if @map.getProjection() == "EPSG:900913"  # google maps; transform this point
+          point.transform(
+              new OpenLayers.Projection("EPSG:4326"), # transform from WGS 1984
+              @map.getProjectionObject()
+          )
+      point
+  p['ptToLl'] = (pt) ->
+      point = new OpenLayers.LonLat(pt.x, pt.y)
+      if @map.getProjection() == "EPSG:900913"  # google maps; transform this point
+          point.transform(
+              @map.getProjectionObject(),
+              new OpenLayers.Projection("EPSG:4326"), # transform to WGS 1984
+          )
+      point
 
   p['minExtract'] = (set, func) ->  # destructive! returns minimum, and also removes it from the set
       bestIndex = 0
