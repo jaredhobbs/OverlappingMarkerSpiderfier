@@ -55,7 +55,7 @@ class @['OverlappingMarkerSpiderfier']
       @map.click.addHandler(=> @['unspiderfy']())
       @map.changeZoom.addHandler(=> @['unspiderfy']())
 
-  p.initMarkerArrays = ->
+  p['initMarkerArrays'] = ->
       @markers = []
       @markerListenerRefs = []
 
@@ -68,8 +68,8 @@ class @['OverlappingMarkerSpiderfier']
       @markers.push(marker)
       @  # return self, for chaining
 
-  p.markerChangeListener = (marker, positionChanged) ->
-      if marker['_omsData']? and (positionChanged or not marker.getVisible()) and not (@spiderfying? or @unspiderfying?)
+  p['markerChangeListener'] = (marker, positionChanged) ->
+      if marker['_omsData']? and (positionChanged or not marker.onmap) and not (@spiderfying? or @unspiderfying?)
           @unspiderfy(if positionChanged then marker else null)
 
   p['getMarkers'] = -> @markers[0..]  # returns a copy, so no funny business
@@ -79,7 +79,7 @@ class @['OverlappingMarkerSpiderfier']
       i = @arrIndexOf(@markers, marker)
       return @ if i < 0
       markerListener = @markerListenerRefs.splice(i, 1)[0]
-      marker.removeEventListener('click', markerListener)
+      marker.click.removeHandler(markerListener)
       delete marker['_oms']
       @markers.splice(i, 1)
       @  # return self, for chaining
@@ -88,7 +88,7 @@ class @['OverlappingMarkerSpiderfier']
       @['unspiderfy']()
       for marker, i in @markers
           markerListener = @markerListenerRefs[i]
-          marker.removeEventListener('click', markerListener)
+          marker.click.removeHandler(markerListener)
           delete marker['_oms']
       @initMarkerArrays()
       @  # return self, for chaining
@@ -107,31 +107,32 @@ class @['OverlappingMarkerSpiderfier']
       @listeners[event] = []
       @  # return self, for chaining
 
-  p.trigger = (event, args...) ->
+  p['trigger'] = (event, args...) ->
       func(args...) for func in (@listeners[event] ? [])
 
-  p.generatePtsCircle = (count, centerPt) ->
+  p['generatePtsCircle'] = (count, centerPt) ->
       circumference = @['circleFootSeparation'] * (2 + count)
       legLength = circumference / twoPi  # = radius from circumference
       angleStep = twoPi / count
       for i in [0...count]
           angle = @['circleStartAngle'] + i * angleStep
-          new mxn.LatLonPoint(centerPt.x + legLength * Math.cos(angle),
-                              centerPt.y + legLength * Math.sin(angle))
+          tmp = new mxn.LatLonPoint()
+          tmp.fromProprietary(@map.api, {lat: centerPt.lat + legLength * Math.cos(angle), lon: centerPt.lon + legLength * Math.sin(angle)})
+          @llToPt(tmp)
 
-  p.generatePtsSpiral = (count, centerPt) ->
+  p['generatePtsSpiral'] = (count, centerPt) ->
       legLength = @['spiralLengthStart']
       angle = 0
       for i in [0...count]
           angle += @['spiralFootSeparation'] / legLength + i * 0.0005
-          pt = new mxn.LatLonPoint(centerPt.x + legLength * Math.cos(angle),
-                                   centerPt.y + legLength * Math.sin(angle))
+          tmp = new mxn.LatLonPoint()
+          tmp.fromProprietary(@map.api, {lat: centerPt.lat + legLength * Math.cos(angle), lon: centerPt.lon + legLength * Math.sin(angle)})
+          pt = @llToPt(tmp)
           legLength += twoPi * @['spiralLengthFactor'] / angle
           pt
 
-  p.spiderListener = (marker) ->
-      markerSpiderfied = marker['_omsData']?
-      @['unspiderfy']() unless markerSpiderfied and @['keepSpiderfied']
+  p['spiderListener'] = (marker) ->
+      markerSpiderfied = marker['_omsData']? @['unspiderfy']() unless markerSpiderfied and @['keepSpiderfied']
       if markerSpiderfied or @map.getMapType() is 'GoogleEarthAPI'  # don't spiderfy in GE Plugin!
           @trigger('click', marker)
       else
@@ -152,14 +153,12 @@ class @['OverlappingMarkerSpiderfier']
               @spiderfy(nearbyMarkerData, nonNearbyMarkers)
 
   p['markersNearMarker'] = (marker, firstOnly = no) ->
-      unless @projHelper.getProjection()?
-          throw "Must wait for 'idle' event on map before calling markersNearMarker"
       nDist = @['nearbyDistance']
       pxSq = nDist * nDist
       markerPt = @llToPt(marker.location)
       markers = []
       for m in @markers
-          continue if m is marker or not m.map? or not m.getVisible()
+          continue if m is marker or not m.map? or not m.onmap
           mPt = @llToPt(m['_omsData']?.usualPosition ? m.location)
           if @ptDistanceSq(mPt, markerPt) < pxSq
               markers.push(m)
@@ -167,19 +166,17 @@ class @['OverlappingMarkerSpiderfier']
       markers
 
   p['markersNearAnyOtherMarker'] = ->  # *very* much quicker than calling markersNearMarker in a loop
-      unless @projHelper.getProjection()?
-          throw "Must wait for 'idle' event on map before calling markersNearAnyOtherMarker"
       nDist = @['nearbyDistance']
       pxSq = nDist * nDist
       mData = for m in @markers
           {pt: @llToPt(m['_omsData']?.usualPosition ? m.location), willSpiderfy: no}
       for m1, i1 in @markers
-          continue unless m1.map? and m1.getVisible()
+          continue unless m1.map? and m1.onmap
           m1Data = mData[i1]
           continue if m1Data.willSpiderfy
           for m2, i2 in @markers
               continue if i2 is i1
-              continue unless m2.map? and m2.getVisible()
+              continue unless m2.map? and m2.onmap
               m2Data = mData[i2]
               continue if i2 < i1 and not m2Data.willSpiderfy
               if @ptDistanceSq(m1Data.pt, m2Data.pt) < pxSq
@@ -187,22 +184,19 @@ class @['OverlappingMarkerSpiderfier']
                   break
       m for m, i in @markers when mData[i].willSpiderfy
 
-  p.makeHighlightListenerFuncs = (marker) ->
-      highlight: => marker['_omsData'].leg.setColor(@['legColors']['highlighted'][@map.getMapType()])
-                    marker['_omsData'].leg.setAttribute('zIndex', @['highlightedLegZIndex'])
-      unhighlight: => marker['_omsData'].leg.setColor(@['legColors']['usual'][@map.mapTypeId])
-                      marker['_omsData'].leg.setAttribute('zIndex', @['usualLegZIndex'])
-
-  p.spiderfy = (markerData, nonNearbyMarkers) ->
+  p['spiderfy'] = (markerData, nonNearbyMarkers) ->
       @spiderfying = yes
       numFeet = markerData.length
       bodyPt = @ptAverage(md.markerPt for md in markerData)
-      footPts = if numFeet >= @['circleSpiralSwitchover'] 
+      footPts = if numFeet >= @['circleSpiralSwitchover']
           @generatePtsSpiral(numFeet, bodyPt).reverse()  # match from outside in => less criss-crossing
       else
           @generatePtsCircle(numFeet, bodyPt)
       spiderfiedMarkers = for footPt in footPts
-          footLl = @ptToLl(footPt)
+          footLl = new mxn.LatLonPoint()
+          footLl.fromProprietary(@map.api, footPt)
+          footLl.lng = footLl.lon + 3
+          footLl.lat += 3
           nearestMarkerDatum = @minExtract(markerData, (md) => @ptDistanceSq(md.markerPt, footPt))
           marker = nearestMarkerDatum.marker
           leg = new mxn.Polyline([marker.location, footLl])
@@ -213,15 +207,9 @@ class @['OverlappingMarkerSpiderfier']
           marker['_omsData'] =
               usualPosition: marker.location
               leg: leg
-          unless @['legColors']['highlighted'][@map.getMapType()] is
-                 @['legColors']['usual'][@map.getMapType()]
-              highlightListenerFuncs = @makeHighlightListenerFuncs(marker)
-              marker['_omsData'].hightlightListeners =
-                  highlight: marker.addEventListener('mouseover', highlightListenerFuncs.highlight)
-                  unhighlight: marker.addEventListener('mouseout',  highlightListenerFuncs.unhighlight)
           marker.lat = footLl.lat
           marker.lon = marker.lng = footLl.lon
-          marker.setAttribute('zIndex', Math.round(@['spiderfiedZIndex'] + footPt.y))  # lower markers cover higher
+          marker.setAttribute('zIndex', Math.round(@['spiderfiedZIndex'] + footPt.lat))  # lower markers cover higher
           marker
       delete @spiderfying
       @spiderfied = yes
@@ -238,10 +226,6 @@ class @['OverlappingMarkerSpiderfier']
               marker.lat = marker['_omsData'].usualPosition.lat unless marker is markerNotToMove
               marker.lon = marker.lng = marker['_omsData'].usualPosition.lon unless marker is markerNotToMove
               marker.setAttribute('zIndex', null)
-              listeners = marker['_omsData'].hightlightListeners
-              if listeners?
-                  marker.removeEventListener(listeners.highlight)
-                  marker.removeEventListener(listeners.unhighlight)
               delete marker['_omsData']
               unspiderfiedMarkers.push(marker)
           else
@@ -251,30 +235,33 @@ class @['OverlappingMarkerSpiderfier']
       @trigger('unspiderfy', unspiderfiedMarkers, nonNearbyMarkers)
       @  # return self, for chaining
 
-  p.ptDistanceSq = (pt1, pt2) -> 
-      dx = pt1.x - pt2.x
-      dy = pt1.y - pt2.y
+  p['ptDistanceSq'] = (pt1, pt2) ->
+      dx = pt1.lon - pt2.lon
+      dy = pt1.lat - pt2.lat
       dx * dx + dy * dy
 
-  p.ptAverage = (pts) ->
+  p['ptAverage'] = (pts) ->
       sumX = sumY = 0
       for pt in pts
-          sumX += pt.x; sumY += pt.y
+          sumX += pt.lon; sumY += pt.lat
       numPts = pts.length
-      new mxn.LatLonPoint(sumX / numPts, sumY / numPts)
+      tmp = new mxn.LatLonPoint()
+      tmp.fromProprietary(@map.api, {lon: sumX / numPts, lat: sumY / numPts})
+      @llToPt(tmp)
 
-  p.llToPt = (ll) -> ll.toProprietary(@map.api)
-  p.ptToLl = (pt) -> mxn.LatLonPoint(0, 0).fromProprietary(@map.api, pt)
+  p['llToPt'] = (ll) -> ll.toProprietary(@map.api)
 
-  p.minExtract = (set, func) ->  # destructive! returns minimum, and also removes it from the set
+  p['minExtract'] = (set, func) ->  # destructive! returns minimum, and also removes it from the set
+      bestIndex = 0
+      bestVal = Number.MAX_VALUE
       for item, index in set
           val = func(item)
-      if ! bestIndex? || val < bestVal
-          bestVal = val
-          bestIndex = index
+          if val < bestVal
+              bestVal = val
+              bestIndex = index
       set.splice(bestIndex, 1)[0]
 
-  p.arrIndexOf = (arr, obj) -> 
+  p['arrIndexOf'] = (arr, obj) ->
       return arr.indexOf(obj) if arr.indexOf?
       (return i if o is obj) for o, i in arr
       -1
