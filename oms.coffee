@@ -12,29 +12,25 @@ return unless this['OpenLayers']?  # return from wrapper func without doing anyt
 
 class @['OverlappingMarkerSpiderfier']
   p = @::  # this saves a lot of repetition of .prototype that isn't optimized away
-  p['VERSION'] = '0.3.1'
+  p['VERSION'] = '0.2.5'
 
   twoPi = Math.PI * 2
 
   p['keepSpiderfied']  = no          # yes -> don't unspiderfy when a marker is selected
-  p['markersWontHide'] = no          # yes -> a promise you won't hide markers, so we needn't check
-  p['markersWontMove'] = no          # yes -> a promise you won't move markers, so we needn't check
-
   p['nearbyDistance'] = 20           # spiderfy markers within this range of the one clicked, in px
 
   p['circleSpiralSwitchover'] = 9    # show spiral instead of circle from this marker count upwards
                                      # 0 -> always spiral; Infinity -> always circle
-  p['circleFootSeparation'] = 23     # related to circumference of circle
+  p['circleFootSeparation'] = 25     # related to circumference of circle
   p['circleStartAngle'] = twoPi / 12
-  p['spiralFootSeparation'] = 26     # related to size of spiral (experiment!)
+  p['spiralFootSeparation'] = 28     # related to size of spiral (experiment!)
   p['spiralLengthStart'] = 11        # ditto
-  p['spiralLengthFactor'] = 4        # ditto
-
-  p['spiderfiedZIndex'] = 1000       # ensure spiderfied markers are on top
-  p['usualLegZIndex'] = 10           # for legs
-  p['highlightedLegZIndex'] = 20     # ensure highlighted leg is always on top
+  p['spiralLengthFactor'] = 5        # ditto
 
   p['legWeight'] = 1.5
+  p['legColors'] =
+      'usual': '#222222'
+      'highlighted': '#f00f00'
 
   # Note: it's OK that this constructor comes after the properties, because a function defined by a 
   # function declaration can be used before the function declaration itself
@@ -42,19 +38,21 @@ class @['OverlappingMarkerSpiderfier']
       (@[k] = v) for own k, v of opts
       @initMarkerArrays()
       @listeners = {}
+      @map.events.register(e, @map, => @['unspiderfy']()) for e in ['mousedown', 'zoomend']
 
   p['initMarkerArrays'] = ->
       @markers = []
-      @markerListenerRefs = []
+      @markerListeners = []
 
   p['addMarker'] = (marker) ->
       return @ if marker['_oms']?
       marker['_oms'] = yes
       markerListener = => @spiderListener(marker)
       marker.events.register('mousedown', marker, markerListener)
-      @markerListenerRefs.push(markerListener)
+      @markerListeners.push(markerListener)
       @markers.push(marker)
       @  # return self, for chaining
+
 
   p['markerChangeListener'] = (marker, positionChanged) ->
       if marker['_omsData']? and (positionChanged or not marker.isDrawn()) and not (@spiderfying? or @unspiderfying?)
@@ -66,7 +64,7 @@ class @['OverlappingMarkerSpiderfier']
       @['unspiderfy']() if marker['_omsData']?  # otherwise it'll be stuck there forever!
       i = @arrIndexOf(@markers, marker)
       return @ if i < 0
-      markerListener = @markerListenerRefs.splice(i, 1)[0]
+      markerListener = @markerListeners.splice(i, 1)[0]
       marker.events.unregister('mousedown', marker, markerListener)
       delete marker['_oms']
       @markers.splice(i, 1)
@@ -75,7 +73,7 @@ class @['OverlappingMarkerSpiderfier']
   p['clearMarkers'] = ->
       @['unspiderfy']()
       for marker, i in @markers
-          markerListener = @markerListenerRefs[i]
+          markerListener = @markerListeners[i]
           marker.events.unregister('mousedown', marker, markerListener)
           delete marker['_oms']
       @initMarkerArrays()
@@ -104,21 +102,22 @@ class @['OverlappingMarkerSpiderfier']
       angleStep = twoPi / count
       for i in [0...count]
           angle = @['circleStartAngle'] + i * angleStep
-          new OpenLayers.Geometry.Point(centerPt.lon + legLength * Math.sin(angle), centerPt.lat + legLength * Math.cos(angle))
+          new OpenLayers.Geometry.Point(centerPt.x + legLength * Math.cos(angle), centerPt.y + legLength * Math.sin(angle))
 
   p['generatePtsSpiral'] = (count, centerPt) ->
       legLength = @['spiralLengthStart']
       angle = 0
       for i in [0...count]
           angle += @['spiralFootSeparation'] / legLength + i * 0.0005
-          pt = new OpenLayers.Geometry.Point(centerPt.lon + legLength * Math.sin(angle), centerPt.lat + legLength * Math.cos(angle))
+          pt = new OpenLayers.Geometry.Point(centerPt.x + legLength * Math.cos(angle), centerPt.y + legLength * Math.sin(angle))
           legLength += twoPi * @['spiralLengthFactor'] / angle
           pt
 
   p['spiderListener'] = (marker) ->
-      markerSpiderfied = marker['_omsData']? @['unspiderfy']() unless markerSpiderfied and @['keepSpiderfied']
+      markerSpiderfied = marker['_omsData']?
+      @['unspiderfy']() unless markerSpiderfied and @['keepSpiderfied']
       if markerSpiderfied
-          @trigger('click', marker)
+          @trigger('mousedown', marker)
       else
           nearbyMarkerData = []
           nonNearbyMarkers = []
@@ -132,9 +131,13 @@ class @['OverlappingMarkerSpiderfier']
               else
                   nonNearbyMarkers.push(m)
           if nearbyMarkerData.length is 1  # 1 => the one clicked => none nearby
-              @trigger('click', marker)
+              @trigger('mousedown', marker)
           else
               @spiderfy(nearbyMarkerData, nonNearbyMarkers)
+  
+  p['makeHighlightListeners'] = (marker) ->
+      highlight: => marker['_omsData'].leg.style['color'] = @['legColors']['highlighted']
+      unhighlight: => marker['_omsData'].leg.style['color'] = @['legColors']['usual']
 
   p['markersNearMarker'] = (marker, firstOnly = no) ->
       nDist = @['nearbyDistance']
@@ -180,11 +183,17 @@ class @['OverlappingMarkerSpiderfier']
           footLl = @ptToLl(footPt)
           nearestMarkerDatum = @minExtract(markerData, (md) => @ptDistanceSq(md.markerPt, footPt))
           marker = nearestMarkerDatum.marker
-          leg = new OpenLayers.Geometry.Curve([marker.lonlat, footLl])
-          @map.getLayersByName('oms')[0].addFeatures(new OpenLayers.Feature.Vector(leg, null, {strokeColor: "black"}))
+          leg = new OpenLayers.Feature.Vector(new OpenLayers.Geometry.Curve([marker.lonlat, footLl]), null, {strokeColor: @['legColors']['usual'], strokeWidth: @['legWeight']})
+          @map.getLayersByName('oms')[0].addFeatures(leg)
           marker['_omsData'] =
               usualPosition: marker.lonlat
               leg: leg
+          unless @['legColors']['highlighted'] is @['legColors']['usual']
+              mhl = @makeHighlightListeners(marker)
+              marker['_omsData'].highlightListeners = mhl
+              marker.events.register('mouseover', marker, mhl.highlight)
+              marker.events.register('mouseout',  marker, mhl.unhighlight)
+          marker.lonlat = footLl
           marker
       delete @spiderfying
       @spiderfied = yes
@@ -197,10 +206,12 @@ class @['OverlappingMarkerSpiderfier']
       nonNearbyMarkers = []
       for marker in @markers
           if marker['_omsData']?
-              @map.removePolyline(marker['_omsData'].leg)
-              marker.lat = marker['_omsData'].usualPosition.lat unless marker is markerNotToMove
-              marker.lon = marker.lng = marker['_omsData'].usualPosition.lon unless marker is markerNotToMove
-              marker.setAttribute('zIndex', null)
+              @map.getLayersByName('oms')[0].removeFeatures([marker['_omsData'].leg])
+              marker.lonlat = marker['_omsData'].usualPosition unless marker is markerNotToMove
+              mhl = marker['_omsData'].highlightListeners
+              if mhl?
+                  marker.events.unregister('mouseover', marker, mhl.highlight)
+                  marker.events.unregister('mouseout',  marker, mhl.unhighlight)
               delete marker['_omsData']
               unspiderfiedMarkers.push(marker)
           else
@@ -220,24 +231,18 @@ class @['OverlappingMarkerSpiderfier']
       for pt in pts
           sumX += pt.x; sumY += pt.y
       numPts = pts.length
-      new OpenLayers.LonLat(sumX / numPts, sumY / numPts)
+      new OpenLayers.Geometry.Point(sumX / numPts, sumY / numPts)
 
   p['llToPt'] = (ll) ->
-      point = new OpenLayers.Geometry.Point(ll.lon, ll.lat)
-      if @map.getProjection() == "EPSG:900913"  # google maps; transform this point
-          point.transform(
-              new OpenLayers.Projection("EPSG:4326"), # transform from WGS 1984
-              @map.getProjectionObject()
-          )
-      point
+      pt = new OpenLayers.Geometry.Point(ll.lon, ll.lat)
+      pt.transform(new OpenLayers.Projection("EPSG:4326"),
+                   new OpenLayers.Projection(@map.getProjection()))
+      pt
   p['ptToLl'] = (pt) ->
-      point = new OpenLayers.LonLat(pt.x, pt.y)
-      if @map.getProjection() == "EPSG:900913"  # google maps; transform this point
-          point.transform(
-              @map.getProjectionObject(),
-              new OpenLayers.Projection("EPSG:4326"), # transform to WGS 1984
-          )
-      point
+      ll = new OpenLayers.LonLat(pt.x, pt.y)
+      ll.transform(new OpenLayers.Projection(@map.getProjection()),
+                   new OpenLayers.Projection("EPSG:4326"))
+      ll
 
   p['minExtract'] = (set, func) ->  # destructive! returns minimum, and also removes it from the set
       bestIndex = 0
